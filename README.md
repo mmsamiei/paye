@@ -5,8 +5,8 @@
 ## اجرای محلی
 
 1. `.env.example` را به `.env.local` کپی کنید و `TELEGRAM_BOT_TOKEN` و `NEXT_PUBLIC_TELEGRAM_BOT_USERNAME` را برای بات خودتان تنظیم کنید. برای مدیریت، Telegram ID مدیران را در `ADMIN_TELEGRAM_IDS` با ویرگول جدا کنید.
-2. PostgreSQL را اجرا کنید: `docker compose up -d db`؛ تصویر از mirror داخلی Divar دریافت می‌شود.
-3. پکیج‌ها را از mirror داخلی نصب کنید: `npm install --registry=https://repos.divar.cloud/artifactory/api/npm/npm`.
+2. PostgreSQL را اجرا کنید: `docker compose up -d db`.
+3. پکیج‌ها را از رجیستری رسمی npm نصب کنید: `npm install --registry=https://registry.npmjs.org`.
 4. متغیرهای `.env.local` را در shell بارگذاری کنید و `npm run db:migrate` را اجرا کنید؛ سپس `npm run dev`.
 5. Mini App را با HTTPS در تنظیمات بات تلگرام ثبت کنید. API فقط `initData` معتبر تلگرام را می‌پذیرد؛ مرورگر عادی محیط تست ورود نیست.
 
