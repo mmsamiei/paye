@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { db, rows, transaction } from '@/lib/db';
 import { event, getViewer, isAdmin, type Viewer } from '@/lib/auth';
 import { getPost, parseId, postSelect, readable, type Post } from '@/lib/posts';
+import { createSpace, listSpaces, spaceColumns, updateSpace } from '@/lib/spaces';
 
 export const runtime = 'nodejs';
 type Context = { params: Promise<{ path: string[] }> };
@@ -108,9 +109,9 @@ async function handle(request: NextRequest, method: string, path: string[]) {
   }
   if (root==='follow-requests' && method==='GET') return json({items:await rows(db,`SELECT f.id,f.follower_id,u.display_name,u.username,f.created_at FROM follows f JOIN users u ON u.id=f.follower_id WHERE f.followee_id=$1 AND f.status='pending' AND u.disabled_at IS NULL ORDER BY f.created_at DESC`,[viewer.id])});
   if (root==='spaces') {
-    if(method==='GET'&&!key)return json({items:await rows(db,'SELECT id,parent_id,name,slug,is_default FROM spaces ORDER BY name')});
+    if(method==='GET'&&!key)return json({items:await listSpaces()});
     const spaceId=id(path,1);
-    if(method==='GET'&&!sub){const [space]=await rows(db,'SELECT id,parent_id,name,slug,is_default FROM spaces WHERE id=$1',[spaceId]);return space?json({space}):json({error:'Not found'},404);}
+    if(method==='GET'&&!sub){const [space]=await rows(db,`SELECT ${spaceColumns} FROM spaces WHERE id=$1`,[spaceId]);return space?json({space}):json({error:'Not found'},404);}
     if(method==='GET'&&sub==='posts')return feed(request,viewer,`p.space_id IN (WITH RECURSIVE descendants AS (SELECT id FROM spaces WHERE id=$2 UNION ALL SELECT s.id FROM spaces s JOIN descendants d ON s.parent_id=d.id) SELECT id FROM descendants)`,[spaceId]);
   }
   if (root==='reports'&&method==='POST') { const input=z.object({target_type:z.enum(['user','post','comment']),target_id:z.string().regex(/^[1-9]\d*$/),reason:z.string().trim().min(3).max(500)}).parse(await body(request));
@@ -120,10 +121,9 @@ async function handle(request: NextRequest, method: string, path: string[]) {
     await db.query('INSERT INTO reports (reporter_id,target_type,target_id,reason) VALUES ($1,$2,$3,$4)',[viewer.id,input.target_type,input.target_id,input.reason]);return json({ok:true},201); }
   if (root==='admin') {
     adminOnly(viewer);
-    if(key==='spaces'&&method==='POST'){const input=z.object({name:z.string().trim().min(1).max(120),slug:z.string().regex(/^[a-z0-9-]{2,80}$/),parent_id:z.string().regex(/^[1-9]\d*$/).nullable().optional(),is_default:z.boolean().optional()}).parse(await body(request)); const [space]=await rows(db,'INSERT INTO spaces (name,slug,parent_id,is_default) VALUES ($1,$2,$3,$4) RETURNING id',[input.name,input.slug,input.parent_id||null,input.is_default||false]);return json({space},201);}
-    if(key==='spaces'&&method==='PATCH'){const spaceId=id(path,2);const input=z.object({name:z.string().trim().min(1).max(120).optional(),slug:z.string().regex(/^[a-z0-9-]{2,80}$/).optional(),parent_id:z.string().regex(/^[1-9]\d*$/).nullable().optional(),is_default:z.boolean().optional()}).parse(await body(request));
-      if(input.parent_id){const [cycle]=await rows(db,`WITH RECURSIVE descendants AS (SELECT id FROM spaces WHERE id=$1 UNION ALL SELECT s.id FROM spaces s JOIN descendants d ON s.parent_id=d.id) SELECT id FROM descendants WHERE id=$2`,[spaceId,input.parent_id]);if(cycle)throw new Error('Invalid parent space');}
-      const space=await transaction(async tx=>{if(input.is_default)await tx.query('UPDATE spaces SET is_default=false WHERE is_default=true');const [updated]=await rows(tx,'UPDATE spaces SET name=COALESCE($2,name),slug=COALESCE($3,slug),parent_id=CASE WHEN $4 THEN $5 ELSE parent_id END,is_default=COALESCE($6,is_default) WHERE id=$1 RETURNING id',[spaceId,input.name??null,input.slug??null,Object.hasOwn(input,'parent_id'),input.parent_id??null,input.is_default??null]);return updated;});return space?json({space}):json({error:'Not found'},404);}
+    const segment=z.string().trim().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/).min(2).max(80);
+    if(key==='spaces'&&method==='POST'){const input=z.object({name:z.string().trim().min(1).max(120),slug_segment:segment,parent_id:z.string().regex(/^[1-9]\d*$/).nullable().optional(),is_default:z.boolean().optional()}).parse(await body(request));return json({space:await createSpace(input)},201);}
+    if(key==='spaces'&&method==='PATCH'){const spaceId=id(path,2);const input=z.object({name:z.string().trim().min(1).max(120).optional(),slug_segment:segment.optional(),parent_id:z.string().regex(/^[1-9]\d*$/).nullable().optional(),is_default:z.boolean().optional()}).parse(await body(request));const space=await updateSpace(spaceId,input);return space?json({space}):json({error:'Not found'},404);}
     if(key==='reports'&&method==='GET')return json({items:await rows(db,"SELECT * FROM reports WHERE status='open' ORDER BY created_at DESC LIMIT 100")});
     if(key==='reports'&&method==='PATCH'){await db.query("UPDATE reports SET status='resolved' WHERE id=$1",[id(path,2)]);return json({ok:true});}
     if(key==='posts'&&method==='DELETE'){await db.query('UPDATE posts SET deleted_at=now() WHERE id=$1',[id(path,2)]);return json({ok:true});}
@@ -134,7 +134,7 @@ async function handle(request: NextRequest, method: string, path: string[]) {
 }
 async function route(request: NextRequest, context: Context, method: string) {
   try { return await handle(request,method,(await context.params).path); }
-  catch(error) { const message=error instanceof Error?error.message:'Unexpected error'; const status=error instanceof z.ZodError?400:/Telegram session|Telegram user|Account disabled/.test(message)?401:/Rate limit/.test(message)?429:/Forbidden/.test(message)?403:/not found/i.test(message)?404:/duplicate key|Request already exists/.test(message)?409:/Invalid|Cannot/.test(message)?400:500; if(status===500)console.error(error); return json({error:status===500?'Server error':status===400&&error instanceof z.ZodError?'Invalid input':message},status); }
+  catch(error) { const message=error instanceof Error?error.message:'Unexpected error'; const code=typeof error==='object'&&error&&'code' in error?error.code:null; const status=error instanceof z.ZodError?400:/Telegram session|Telegram user|Account disabled/.test(message)?401:/Rate limit/.test(message)?429:/Forbidden/.test(message)?403:/not found/i.test(message)?404:code==='23505'||/Request already exists/.test(message)?409:/Invalid|Cannot/.test(message)?400:500; if(status===500)console.error(error); return json({error:status===500?'Server error':status===409?'این شناسه در همین فضا قبلاً استفاده شده است.':status===400&&error instanceof z.ZodError?'Invalid input':message},status); }
 }
 export const GET=(request:NextRequest,context:Context)=>route(request,context,'GET');
 export const POST=(request:NextRequest,context:Context)=>route(request,context,'POST');

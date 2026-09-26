@@ -10,7 +10,7 @@
 4. متغیرهای `.env.local` را در shell بارگذاری کنید و `npm run db:migrate` را اجرا کنید؛ سپس برای اجرای پایدار دمو `docker compose up -d --build app`.
 5. Mini App را با HTTPS در تنظیمات بات تلگرام ثبت کنید. API فقط `initData` معتبر تلگرام را می‌پذیرد؛ مرورگر عادی محیط تست ورود نیست.
 
-برای اولین دانشگاه، مدیر یک Space با `POST /api/admin/spaces` و `is_default: true` ایجاد می‌کند. Spaceهای بعدی هم با همین API ایجاد می‌شوند. درخواست‌های API باید هدر `Authorization: tma <initData>` داشته باشند.
+برای اولین دانشگاه، مدیر یک Space با `POST /api/admin/spaces` و `is_default: true` ایجاد می‌کند. هر Space یک `slug_segment` محلی دارد؛ برای نمونه `sharif-university` برای والد و `computer-engineering` برای فرزند با `parent_id` والد. سرور اسلاگ کامل فرزند را به‌صورت `sharif-university/computer-engineering` می‌سازد و هنگام جابه‌جایی یا تغییر اسلاگ والد، مسیر فرزندان را هم به‌روز می‌کند. در رابط مدیریت، مسیر کامل پیش از ثبت نمایش داده می‌شود. کاربر در فرم پست و فید، فضا را با جست‌وجوی نام یا مسیر انتخاب می‌کند. درخواست‌های API باید هدر `Authorization: tma <initData>` داشته باشند.
 
 ## API اصلی
 
