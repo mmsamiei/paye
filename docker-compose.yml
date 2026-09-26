@@ -1,0 +1,13 @@
+services:
+  db:
+    image: repos.divar.cloud/dockerhub/postgres:17-alpine
+    environment:
+      POSTGRES_USER: paye
+      POSTGRES_PASSWORD: paye
+      POSTGRES_DB: paye
+    ports:
+      - "5432:5432"
+    volumes:
+      - paye_db:/var/lib/postgresql/data
+volumes:
+  paye_db:
