@@ -1,7 +1,7 @@
 'use client';
 import { useMemo, useState } from 'react';
 
-export type SpaceOption = { id:string; parent_id:string|null; name:string; slug:string; slug_segment:string; is_default:boolean };
+export type SpaceOption = { id:string; parent_id:string|null; name:string; slug:string; slug_segment:string; aliases:string[]; is_default:boolean };
 
 export function spaceLabel(space:SpaceOption, spaces:SpaceOption[]):string {
   const names=[space.name];
@@ -16,6 +16,7 @@ export function spaceLabel(space:SpaceOption, spaces:SpaceOption[]):string {
 }
 
 const normalize=(text:string)=>text.toLocaleLowerCase('fa').replace(/[يى]/g,'ی').replace(/ك/g,'ک').trim();
+const recentKey='paye-recent-spaces';
 
 export default function SpacePicker({spaces,value,onChange,emptyLabel,placeholder}:{
   spaces:SpaceOption[];value:string;onChange:(id:string)=>void;emptyLabel:string;placeholder:string;
@@ -23,18 +24,22 @@ export default function SpacePicker({spaces,value,onChange,emptyLabel,placeholde
   const [open,setOpen]=useState(false);
   const [query,setQuery]=useState('');
   const [active,setActive]=useState(0);
+  const [recent,setRecent]=useState<string[]>([]);
   const options=useMemo(()=>spaces.map(space=>({space,label:spaceLabel(space,spaces)})),[spaces]);
   const selected=options.find(option=>option.space.id===value);
   const matches=options.filter(option=>{
-    const haystack=normalize(`${option.label} ${option.space.slug}`);
+    const haystack=normalize(`${option.label} ${option.space.slug} ${option.space.aliases.join(' ')}`);
     return normalize(query).split(/\s+/).every(word=>haystack.includes(word));
-  }).slice(0,8);
+  }).sort((a,b)=>query.trim()?0:(recent.includes(a.space.id)?recent.indexOf(a.space.id):999)-(recent.includes(b.space.id)?recent.indexOf(b.space.id):999)).slice(0,8);
   const choices=[...(query.trim()?[]:[{id:'',label:emptyLabel,slug:''}]),...matches.map(option=>({id:option.space.id,label:option.label,slug:option.space.slug}))];
-  const choose=(id:string)=>{onChange(id);setQuery('');setOpen(false);setActive(0);};
+  const choose=(id:string)=>{
+    if(id){const updated=[id,...recent.filter(item=>item!==id)].slice(0,5);setRecent(updated);try{localStorage.setItem(recentKey,JSON.stringify(updated));}catch{}}
+    onChange(id);setQuery('');setOpen(false);setActive(0);
+  };
   return <div className="space-picker">
     <input role="combobox" aria-label={placeholder} aria-autocomplete="list" aria-expanded={open}
       placeholder={placeholder} value={open?query:(selected?.label||emptyLabel)}
-      onFocus={()=>{setQuery('');setOpen(true);setActive(0);}}
+      onFocus={()=>{try{const saved=JSON.parse(localStorage.getItem(recentKey)||'[]');if(Array.isArray(saved))setRecent(saved.filter(item=>typeof item==='string').slice(0,5));}catch{}setQuery('');setOpen(true);setActive(0);}}
       onChange={event=>{setQuery(event.target.value);setOpen(true);setActive(0);}}
       onBlur={()=>setTimeout(()=>setOpen(false),150)}
       onKeyDown={event=>{

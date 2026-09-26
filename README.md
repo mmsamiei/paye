@@ -12,6 +12,8 @@
 
 برای اولین دانشگاه، مدیر یک Space با `POST /api/admin/spaces` و `is_default: true` ایجاد می‌کند. هر Space یک `slug_segment` محلی دارد؛ برای نمونه `sharif-university` برای والد و `computer-engineering` برای فرزند با `parent_id` والد. سرور اسلاگ کامل فرزند را به‌صورت `sharif-university/computer-engineering` می‌سازد و هنگام جابه‌جایی یا تغییر اسلاگ والد، مسیر فرزندان را هم به‌روز می‌کند. در رابط مدیریت، مسیر کامل پیش از ثبت نمایش داده می‌شود. کاربر در فرم پست و فید، فضا را با جست‌وجوی نام یا مسیر انتخاب می‌کند. درخواست‌های API باید هدر `Authorization: tma <initData>` داشته باشند.
 
+مدیر می‌تواند برای هر Space آرایهٔ `aliases` را هم تنظیم کند تا نام‌های رایج‌تر در جست‌وجو پیدا شوند. فضاهای اخیر هر کاربر فقط در `localStorage` دستگاهش نگه‌داری می‌شوند. فرم انتشار پست در مسیر `/compose` قرار دارد؛ پس از انتشار، صفحهٔ همان پست باز می‌شود.
+
 ## API اصلی
 
 `/api/me`, `/api/feed`, `/api/posts`, `/api/posts/:id/comments`, `/api/users/:id`, `/api/users/:id/follow`, `/api/follow-requests`, `/api/spaces`, `/api/spaces/:id/posts`, `/api/me/notifications`, `/api/reports`.

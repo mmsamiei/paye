@@ -4,8 +4,23 @@ import { Pool } from 'pg';
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 try {
-  for (const file of ['sql/001_initial.sql', 'sql/002_space_paths.sql']) {
-    await pool.query(readFileSync(resolve(file), 'utf8'));
+  await pool.query('CREATE TABLE IF NOT EXISTS schema_migrations (name TEXT PRIMARY KEY)');
+  for (const file of ['sql/001_initial.sql', 'sql/002_space_paths.sql', 'sql/003_space_aliases.sql']) {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const applied = await client.query('SELECT 1 FROM schema_migrations WHERE name=$1', [file]);
+      if (!applied.rowCount) {
+        await client.query(readFileSync(resolve(file), 'utf8'));
+        await client.query('INSERT INTO schema_migrations (name) VALUES ($1)', [file]);
+      }
+      await client.query('COMMIT');
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
   }
   console.log('Database schema ready');
 } finally {

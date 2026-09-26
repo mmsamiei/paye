@@ -6,10 +6,11 @@ export type Space = {
   name: string;
   slug_segment: string;
   slug: string;
+  aliases: string[];
   is_default: boolean;
 };
 
-export const spaceColumns = 'id,parent_id,name,slug_segment,slug,is_default';
+export const spaceColumns = 'id,parent_id,name,slug_segment,slug,aliases,is_default';
 
 async function parentPath(sql: Sql, parentId: string | null): Promise<string> {
   if (!parentId) return '';
@@ -22,15 +23,16 @@ export async function createSpace(input: {
   name: string;
   slug_segment: string;
   parent_id?: string | null;
+  aliases?: string[];
   is_default?: boolean;
 }): Promise<Space> {
   return transaction(async sql => {
     const parent = await parentPath(sql, input.parent_id || null);
     const slug = parent ? `${parent}/${input.slug_segment}` : input.slug_segment;
     const [space] = await rows<Space>(sql,
-      `INSERT INTO spaces (name,slug_segment,slug,parent_id,is_default)
-       VALUES ($1,$2,$3,$4,$5) RETURNING ${spaceColumns}`,
-      [input.name,input.slug_segment,slug,input.parent_id || null,input.is_default || false]);
+      `INSERT INTO spaces (name,slug_segment,slug,parent_id,aliases,is_default)
+       VALUES ($1,$2,$3,$4,$5,$6) RETURNING ${spaceColumns}`,
+      [input.name,input.slug_segment,slug,input.parent_id || null,input.aliases || [],input.is_default || false]);
     return space;
   });
 }
@@ -39,6 +41,7 @@ export async function updateSpace(spaceId: string, input: {
   name?: string;
   slug_segment?: string;
   parent_id?: string | null;
+  aliases?: string[];
   is_default?: boolean;
 }): Promise<Space | null> {
   return transaction(async sql => {
@@ -56,8 +59,8 @@ export async function updateSpace(spaceId: string, input: {
     const segment = input.slug_segment ?? current.slug_segment;
     const newSlug = parent ? `${parent}/${segment}` : segment;
     if (input.is_default) await sql.query('UPDATE spaces SET is_default=false WHERE is_default=true');
-    await sql.query(`UPDATE spaces SET name=$2,slug_segment=$3,parent_id=$4,is_default=$5
-      WHERE id=$1`, [spaceId,input.name ?? current.name,segment,parentId,input.is_default ?? current.is_default]);
+    await sql.query(`UPDATE spaces SET name=$2,slug_segment=$3,parent_id=$4,aliases=$5,is_default=$6
+      WHERE id=$1`, [spaceId,input.name ?? current.name,segment,parentId,input.aliases ?? current.aliases,input.is_default ?? current.is_default]);
     await sql.query(`WITH RECURSIVE branch AS (
       SELECT id,$2::text AS path FROM spaces WHERE id=$1
       UNION ALL SELECT child.id, branch.path || '/' || child.slug_segment

@@ -122,8 +122,9 @@ async function handle(request: NextRequest, method: string, path: string[]) {
   if (root==='admin') {
     adminOnly(viewer);
     const segment=z.string().trim().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/).min(2).max(80);
-    if(key==='spaces'&&method==='POST'){const input=z.object({name:z.string().trim().min(1).max(120),slug_segment:segment,parent_id:z.string().regex(/^[1-9]\d*$/).nullable().optional(),is_default:z.boolean().optional()}).parse(await body(request));return json({space:await createSpace(input)},201);}
-    if(key==='spaces'&&method==='PATCH'){const spaceId=id(path,2);const input=z.object({name:z.string().trim().min(1).max(120).optional(),slug_segment:segment.optional(),parent_id:z.string().regex(/^[1-9]\d*$/).nullable().optional(),is_default:z.boolean().optional()}).parse(await body(request));const space=await updateSpace(spaceId,input);return space?json({space}):json({error:'Not found'},404);}
+    const aliases=z.array(z.string().trim().min(2).max(80)).max(20);
+    if(key==='spaces'&&method==='POST'){const input=z.object({name:z.string().trim().min(1).max(120),slug_segment:segment,parent_id:z.string().regex(/^[1-9]\d*$/).nullable().optional(),aliases:aliases.optional(),is_default:z.boolean().optional()}).parse(await body(request));return json({space:await createSpace(input)},201);}
+    if(key==='spaces'&&method==='PATCH'){const spaceId=id(path,2);const input=z.object({name:z.string().trim().min(1).max(120).optional(),slug_segment:segment.optional(),parent_id:z.string().regex(/^[1-9]\d*$/).nullable().optional(),aliases:aliases.optional(),is_default:z.boolean().optional()}).parse(await body(request));const space=await updateSpace(spaceId,input);return space?json({space}):json({error:'Not found'},404);}
     if(key==='reports'&&method==='GET')return json({items:await rows(db,"SELECT * FROM reports WHERE status='open' ORDER BY created_at DESC LIMIT 100")});
     if(key==='reports'&&method==='PATCH'){await db.query("UPDATE reports SET status='resolved' WHERE id=$1",[id(path,2)]);return json({ok:true});}
     if(key==='posts'&&method==='DELETE'){await db.query('UPDATE posts SET deleted_at=now() WHERE id=$1',[id(path,2)]);return json({ok:true});}
