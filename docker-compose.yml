@@ -6,8 +6,19 @@ services:
       POSTGRES_PASSWORD: paye
       POSTGRES_DB: paye
     ports:
-      - "5433:5432"
+      - "127.0.0.1:5433:5432"
     volumes:
       - paye_db:/var/lib/postgresql/data
+  app:
+    build: .
+    env_file: .env.local
+    environment:
+      DATABASE_URL: postgres://paye:paye@db:5432/paye
+      PORT: "3000"
+    depends_on:
+      - db
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
 volumes:
   paye_db:
