@@ -5,7 +5,7 @@ import { Pool } from 'pg';
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 try {
   await pool.query('CREATE TABLE IF NOT EXISTS schema_migrations (name TEXT PRIMARY KEY)');
-  for (const file of ['sql/001_initial.sql', 'sql/002_space_paths.sql', 'sql/003_space_aliases.sql']) {
+  for (const file of ['sql/001_initial.sql', 'sql/002_space_paths.sql', 'sql/003_space_aliases.sql', 'sql/004_avatar_visibility.sql']) {
     const client = await pool.connect();
     try {
       await client.query('BEGIN');

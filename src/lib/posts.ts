@@ -1,10 +1,10 @@
 import { db, rows } from './db';
 import type { Viewer } from './auth';
 
-export type Post = { id: string; author_id: string; display_name: string; username: string | null; body: string; visibility: 'public' | 'private'; space_id: string | null; space_name: string | null; created_at: string; updated_at: string; comment_count: string };
+export type Post = { id: string; author_id: string; display_name: string; username: string | null; avatar_url: string | null; body: string; visibility: 'public' | 'private'; space_id: string | null; space_name: string | null; created_at: string; updated_at: string; comment_count: string };
 export const readable = `(p.visibility='public' OR p.author_id=$1 OR EXISTS (
   SELECT 1 FROM follows f WHERE f.follower_id=$1 AND f.followee_id=p.author_id AND f.status='accepted'))`;
-export const postSelect = `SELECT p.id,p.author_id,u.display_name,u.username,p.body,p.visibility,p.space_id,s.name AS space_name,p.created_at,p.updated_at,
+export const postSelect = `SELECT p.id,p.author_id,u.display_name,u.username,CASE WHEN u.show_avatar THEN u.avatar_url ELSE NULL END AS avatar_url,p.body,p.visibility,p.space_id,s.name AS space_name,p.created_at,p.updated_at,
   (SELECT count(*) FROM comments c WHERE c.post_id=p.id AND c.deleted_at IS NULL)::text AS comment_count
   FROM posts p JOIN users u ON u.id=p.author_id LEFT JOIN spaces s ON s.id=p.space_id`;
 export async function getPost(id: string, viewer: Viewer): Promise<Post | null> {
