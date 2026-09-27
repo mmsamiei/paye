@@ -19,7 +19,7 @@ export default function ComposePost(){
   useEffect(()=>{
     window.Telegram?.WebApp?.ready();window.Telegram?.WebApp?.expand();
     Promise.all([api<{viewer:{display_name:string}}>('me'),api<{items:SpaceOption[]}>('spaces')])
-      .then(([me,data])=>{setAuthor(me.viewer.display_name);setSpaces(data.items);setSpaceId(data.items.find(space=>space.is_default)?.id||'');setReady(true);})
+      .then(([me,data])=>{setAuthor(me.viewer.display_name);setSpaces(data.items);const requestedSpace=new URLSearchParams(window.location.search).get('space');setSpaceId(data.items.find(space=>space.id===requestedSpace)?.id||'');setReady(true);})
       .catch(err=>{setError(err instanceof Error?err.message:'خطا در بارگذاری');setReady(true);});
   },[api]);
 
