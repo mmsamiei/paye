@@ -1,7 +1,8 @@
 'use client';
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import SpacePicker, { type SpaceOption } from './SpacePicker';
+import { type SpaceOption } from './SpacePicker';
+import SpaceChooser from './SpaceChooser';
 import { useApi } from '@/lib/client-api';
 import Avatar from './Avatar';
 
@@ -39,7 +40,7 @@ export default function ComposePost(){
     {ready&&<main className="compose-main"><div className="compose-author"><Avatar name={author} url={authorAvatar}/><strong>{author}</strong></div>
       <textarea className="compose-text" autoFocus placeholder="چه چیزی توی ذهنته؟" value={body} onChange={event=>setBody(event.target.value)} maxLength={4000} aria-label="متن پست"/>
       <div className="compose-count">{body.length.toLocaleString('fa-IR')} / ۴٬۰۰۰</div>
-      <div className="compose-settings"><label>نمایش<select value={visibility} onChange={event=>setVisibility(event.target.value as 'public'|'private')}><option value="public">عمومی</option><option value="private">فقط دنبال‌کنندگان پذیرفته‌شده</option></select></label><label>فضا<SpacePicker spaces={spaces} value={spaceId} onChange={setSpaceId} emptyLabel="بدون فضا" placeholder="جست‌وجوی فضا برای پست"/></label></div>
+      <div className="compose-settings"><label>نمایش<select value={visibility} onChange={event=>setVisibility(event.target.value as 'public'|'private')}><option value="public">عمومی</option><option value="private">فقط دنبال‌کنندگان پذیرفته‌شده</option></select></label><SpaceChooser spaces={spaces} value={spaceId} onChange={setSpaceId} mode="compose"/></div>
     </main>}
   </div>;
 }
