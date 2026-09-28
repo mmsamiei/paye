@@ -5,6 +5,7 @@ import { db, rows, transaction } from '@/lib/db';
 import { event, getViewer, isAdmin, type Viewer } from '@/lib/auth';
 import { avatarSql, getPost, parseId, postSelect, readable, type Post } from '@/lib/posts';
 import { createSpace, listSpaces, spaceColumns, updateSpace } from '@/lib/spaces';
+import { sendCommentBotNotification } from '@/lib/bot-notifications';
 
 export const runtime = 'nodejs';
 type Context = { params: Promise<{ path: string[] }> };
@@ -24,7 +25,18 @@ async function existsSpace(spaceId: string | null | undefined) {
   if (!space) throw new Error('Space not found');
 }
 async function notification(userId: string, actorId: string, kind: string, postId?: string, commentId?: string) {
-  if (userId !== actorId) await db.query('INSERT INTO notifications (user_id,actor_id,kind,post_id,comment_id) VALUES ($1,$2,$3,$4,$5)', [userId,actorId,kind,postId || null,commentId || null]);
+  if (userId === actorId) return;
+  await db.query('INSERT INTO notifications (user_id,actor_id,kind,post_id,comment_id) VALUES ($1,$2,$3,$4,$5)', [userId,actorId,kind,postId || null,commentId || null]);
+  if (kind === 'comment' && postId && commentId) {
+    try {
+      const [recipient] = await rows<{telegram_id:string}>(db, 'SELECT telegram_id::text FROM users WHERE id=$1 AND disabled_at IS NULL', [userId]);
+      const [actor] = await rows<{display_name:string}>(db, 'SELECT display_name FROM users WHERE id=$1', [actorId]);
+      if (recipient && actor) {
+        const sent = await sendCommentBotNotification({ chatId:recipient.telegram_id, actorName:actor.display_name, postId, commentId });
+        if (!sent) console.warn('Telegram comment notification was not delivered');
+      }
+    } catch (error) { console.warn('Telegram comment notification failed', error instanceof Error ? error.name : 'Unknown error'); }
+  }
 }
 function cursor(url: URL) {
   const raw = url.searchParams.get('cursor');
@@ -90,7 +102,12 @@ async function handle(request: NextRequest, method: string, path: string[]) {
     }
     if (sub === 'comments') {
       const post = await getPost(postId,viewer); if (!post) return json({ error:'Not found' },404);
-      if (method === 'GET') return json({ items: await rows(db, `SELECT c.id,c.post_id,c.author_id,c.body,c.created_at,u.display_name,${avatarSql} AS avatar_url FROM comments c JOIN users u ON u.id=c.author_id LEFT JOIN user_avatar_uploads ua ON ua.user_id=u.id WHERE c.post_id=$1 AND c.deleted_at IS NULL AND u.disabled_at IS NULL ORDER BY c.created_at,c.id LIMIT 100`, [postId]) });
+      if (method === 'GET') {
+        const target = request.nextUrl.searchParams.get('target');
+        if (target) parseId(target);
+        const extra = target ? 'AND (c.id=$2 OR c.id IN (SELECT id FROM comments WHERE post_id=$1 AND deleted_at IS NULL ORDER BY created_at,id LIMIT 100))' : '';
+        return json({ items: await rows(db, `SELECT c.id,c.post_id,c.author_id,c.body,c.created_at,u.display_name,${avatarSql} AS avatar_url FROM comments c JOIN users u ON u.id=c.author_id LEFT JOIN user_avatar_uploads ua ON ua.user_id=u.id WHERE c.post_id=$1 AND c.deleted_at IS NULL AND u.disabled_at IS NULL ${extra} ORDER BY c.created_at,c.id LIMIT ${target ? 101 : 100}`, target ? [postId,target] : [postId]) });
+      }
       if (method === 'POST') { await rateLimit(viewer,'comment_created',20,60); const input=commentInput.parse(await body(request)); const [created]=await rows<{id:string}>(db,`INSERT INTO comments (post_id,author_id,body) SELECT p.id,$2,$3 FROM posts p JOIN users u ON u.id=p.author_id WHERE p.id=$1 AND p.deleted_at IS NULL AND u.disabled_at IS NULL AND (p.visibility='public' OR p.author_id=$2 OR EXISTS (SELECT 1 FROM follows f WHERE f.follower_id=$2 AND f.followee_id=p.author_id AND f.status='accepted')) RETURNING id`,[postId,viewer.id,input.body]); if(!created)return json({error:'Not found'},404); await notification(post.author_id,viewer.id,'comment',postId,created.id); await event(db,viewer,'comment_created',{post_id:postId}); return json({id:created.id},201); }
     }
   }
