@@ -20,8 +20,8 @@ export default function ComposePost(){
 
   useEffect(()=>{
     window.Telegram?.WebApp?.ready();window.Telegram?.WebApp?.expand();
-    Promise.all([api<{viewer:{display_name:string;avatar_url:string|null;show_avatar:boolean}}>('me'),api<{items:SpaceOption[]}>('spaces')])
-      .then(([me,data])=>{setAuthor(me.viewer.display_name);setAuthorAvatar(me.viewer.show_avatar?me.viewer.avatar_url:null);setSpaces(data.items);const requestedSpace=new URLSearchParams(window.location.search).get('space');setSpaceId(data.items.find(space=>space.id===requestedSpace)?.id||'');setReady(true);})
+    Promise.all([api<{viewer:{display_name:string;avatar_display_url:string|null}}>('me'),api<{items:SpaceOption[]}>('spaces')])
+      .then(([me,data])=>{setAuthor(me.viewer.display_name);setAuthorAvatar(me.viewer.avatar_display_url);setSpaces(data.items);const requestedSpace=new URLSearchParams(window.location.search).get('space');setSpaceId(data.items.find(space=>space.id===requestedSpace)?.id||'');setReady(true);})
       .catch(err=>{setError(err instanceof Error?err.message:'خطا در بارگذاری');setReady(true);});
   },[api]);
 

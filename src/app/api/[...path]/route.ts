@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
+import sharp from 'sharp';
 import { db, rows, transaction } from '@/lib/db';
 import { event, getViewer, isAdmin, type Viewer } from '@/lib/auth';
-import { getPost, parseId, postSelect, readable, type Post } from '@/lib/posts';
+import { avatarSql, getPost, parseId, postSelect, readable, type Post } from '@/lib/posts';
 import { createSpace, listSpaces, spaceColumns, updateSpace } from '@/lib/spaces';
 
 export const runtime = 'nodejs';
@@ -50,9 +51,21 @@ async function handle(request: NextRequest, method: string, path: string[]) {
   const viewer = await getViewer(request);
   const [root, key, sub] = path;
   if (root === 'me') {
-    if (method === 'GET' && !key) { await event(db,viewer,'session'); return json({ viewer, admin: isAdmin(viewer) }); }
+    if (method === 'GET' && !key) { const [avatar]=await rows<{avatar_url:string|null;has_custom_avatar:boolean}>(db,`SELECT ${avatarSql} AS avatar_url,ua.user_id IS NOT NULL AS has_custom_avatar FROM users u LEFT JOIN user_avatar_uploads ua ON ua.user_id=u.id WHERE u.id=$1`,[viewer.id]); await event(db,viewer,'session'); return json({ viewer:{...viewer,avatar_display_url:avatar.avatar_url,has_custom_avatar:avatar.has_custom_avatar}, admin: isAdmin(viewer) }); }
     if (method === 'PATCH' && !key) { const input=z.object({show_avatar:z.boolean()}).parse(await body(request)); await db.query('UPDATE users SET show_avatar=$2,updated_at=now() WHERE id=$1',[viewer.id,input.show_avatar]); return json({show_avatar:input.show_avatar}); }
     if (method === 'DELETE' && !key) { await transaction(async tx => { await tx.query('DELETE FROM users WHERE id=$1', [viewer.id]); }); return json({ ok:true }); }
+    if (key === 'avatar' && !sub && method === 'POST') {
+      const form=await request.formData();
+      const file=form.get('image');
+      if (!(file instanceof File) || !['image/jpeg','image/png','image/webp'].includes(file.type) || file.size===0 || file.size>4*1024*1024) return json({error:'عکس باید JPG، PNG یا WebP و حداکثر ۴ مگابایت باشد.'},400);
+      let image:Buffer;
+      try { const source=sharp(Buffer.from(await file.arrayBuffer()),{limitInputPixels:16_000_000,animated:false}); const metadata=await source.metadata(); if(!['jpeg','png','webp'].includes(metadata.format||''))throw new Error('Unsupported image'); image=await source.rotate().resize(256,256,{fit:'cover',position:'attention'}).webp({quality:82}).toBuffer(); }
+      catch { return json({error:'فایل تصویر معتبر نیست.'},400); }
+      if(image.length>524288)return json({error:'اندازهٔ تصویر پردازش‌شده بیش از حد است.'},400);
+      await transaction(async tx=>{await tx.query('INSERT INTO user_avatar_uploads (user_id,image) VALUES ($1,$2) ON CONFLICT (user_id) DO UPDATE SET image=EXCLUDED.image,updated_at=now()',[viewer.id,image]);await tx.query('UPDATE users SET show_avatar=true,updated_at=now() WHERE id=$1',[viewer.id]);});
+      return json({ok:true});
+    }
+    if (key === 'avatar' && !sub && method === 'DELETE') { await db.query('DELETE FROM user_avatar_uploads WHERE user_id=$1',[viewer.id]); return json({ok:true}); }
     if (method === 'GET' && key === 'notifications') return json({ items: await rows(db, `SELECT n.id,n.kind,n.post_id,n.read_at,n.created_at,a.display_name AS actor_name FROM notifications n LEFT JOIN users a ON a.id=n.actor_id WHERE n.user_id=$1 ORDER BY n.created_at DESC LIMIT 100`, [viewer.id]) });
     if (method === 'POST' && key === 'notifications' && sub) { await db.query('UPDATE notifications SET read_at=now() WHERE id=$1 AND user_id=$2', [id(path,2),viewer.id]); return json({ ok:true }); }
   }
@@ -77,7 +90,7 @@ async function handle(request: NextRequest, method: string, path: string[]) {
     }
     if (sub === 'comments') {
       const post = await getPost(postId,viewer); if (!post) return json({ error:'Not found' },404);
-      if (method === 'GET') return json({ items: await rows(db, `SELECT c.id,c.post_id,c.author_id,c.body,c.created_at,u.display_name,CASE WHEN u.show_avatar THEN u.avatar_url ELSE NULL END AS avatar_url FROM comments c JOIN users u ON u.id=c.author_id WHERE c.post_id=$1 AND c.deleted_at IS NULL AND u.disabled_at IS NULL ORDER BY c.created_at,c.id LIMIT 100`, [postId]) });
+      if (method === 'GET') return json({ items: await rows(db, `SELECT c.id,c.post_id,c.author_id,c.body,c.created_at,u.display_name,${avatarSql} AS avatar_url FROM comments c JOIN users u ON u.id=c.author_id LEFT JOIN user_avatar_uploads ua ON ua.user_id=u.id WHERE c.post_id=$1 AND c.deleted_at IS NULL AND u.disabled_at IS NULL ORDER BY c.created_at,c.id LIMIT 100`, [postId]) });
       if (method === 'POST') { await rateLimit(viewer,'comment_created',20,60); const input=commentInput.parse(await body(request)); const [created]=await rows<{id:string}>(db,`INSERT INTO comments (post_id,author_id,body) SELECT p.id,$2,$3 FROM posts p JOIN users u ON u.id=p.author_id WHERE p.id=$1 AND p.deleted_at IS NULL AND u.disabled_at IS NULL AND (p.visibility='public' OR p.author_id=$2 OR EXISTS (SELECT 1 FROM follows f WHERE f.follower_id=$2 AND f.followee_id=p.author_id AND f.status='accepted')) RETURNING id`,[postId,viewer.id,input.body]); if(!created)return json({error:'Not found'},404); await notification(post.author_id,viewer.id,'comment',postId); await event(db,viewer,'comment_created',{post_id:postId}); return json({id:created.id},201); }
     }
   }
@@ -85,7 +98,7 @@ async function handle(request: NextRequest, method: string, path: string[]) {
   if (root === 'users') {
     const userId=id(path,1);
     if (method === 'GET' && !sub) {
-      const [user]=await rows(db,`SELECT id,display_name,username,CASE WHEN show_avatar THEN avatar_url ELSE NULL END AS avatar_url,show_avatar,created_at FROM users WHERE id=$1 AND disabled_at IS NULL`,[userId]);
+      const [user]=await rows(db,`SELECT u.id,u.display_name,u.username,${avatarSql} AS avatar_url,u.show_avatar,ua.user_id IS NOT NULL AS has_custom_avatar,u.created_at FROM users u LEFT JOIN user_avatar_uploads ua ON ua.user_id=u.id WHERE u.id=$1 AND u.disabled_at IS NULL`,[userId]);
       if (!user) return json({error:'Not found'},404);
       const [relation]=await rows<{status:string}>(db,'SELECT status FROM follows WHERE follower_id=$1 AND followee_id=$2',[viewer.id,userId]);
       const [counts]=await rows(db,`SELECT (SELECT count(*) FROM follows WHERE followee_id=$1 AND status='accepted')::text AS followers,(SELECT count(*) FROM follows WHERE follower_id=$1 AND status='accepted')::text AS following`,[userId]);
