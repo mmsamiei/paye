@@ -1,0 +1,2 @@
+ALTER TABLE notifications
+  ADD COLUMN IF NOT EXISTS comment_id BIGINT REFERENCES comments(id) ON DELETE SET NULL;
