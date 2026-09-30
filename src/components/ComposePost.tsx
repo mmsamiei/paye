@@ -5,6 +5,7 @@ import { type SpaceOption } from './SpacePicker';
 import SpaceChooser from './SpaceChooser';
 import { useApi } from '@/lib/client-api';
 import Avatar from './Avatar';
+import { categories, categoryLabel, classifyPost, type Category } from '@/lib/categories';
 
 export default function ComposePost(){
   const api=useApi();
@@ -14,6 +15,7 @@ export default function ComposePost(){
   const [spaces,setSpaces]=useState<SpaceOption[]>([]);
   const [spaceId,setSpaceId]=useState('');
   const [body,setBody]=useState('');
+  const [categoryOverride,setCategoryOverride]=useState<Category|null|undefined>(undefined);
   const [visibility,setVisibility]=useState<'public'|'private'>('public');
   const [ready,setReady]=useState(false);
   const [busy,setBusy]=useState(false);
@@ -29,7 +31,7 @@ export default function ComposePost(){
   const publish=async()=>{
     setError('');setBusy(true);
     try{
-      const result=await api<{id:string}>('posts',{method:'POST',body:JSON.stringify({body,visibility,space_id:spaceId||null})});
+      const result=await api<{id:string}>('posts',{method:'POST',body:JSON.stringify({body,visibility,space_id:spaceId||null,category:categoryOverride})});
       router.replace(`/posts/${result.id}`);
     }catch(err){setError(err instanceof Error?err.message:'انتشار انجام نشد');setBusy(false);}
   };
@@ -40,7 +42,7 @@ export default function ComposePost(){
     {ready&&<main className="compose-main"><div className="compose-author"><Avatar name={author} url={authorAvatar}/><strong>{author}</strong></div>
       <textarea className="compose-text" autoFocus placeholder="چه چیزی توی ذهنته؟" value={body} onChange={event=>setBody(event.target.value)} maxLength={4000} aria-label="متن پست"/>
       <div className="compose-count">{body.length.toLocaleString('fa-IR')} / ۴٬۰۰۰</div>
-      <div className="compose-settings"><label>نمایش<select value={visibility} onChange={event=>setVisibility(event.target.value as 'public'|'private')}><option value="public">عمومی</option><option value="private">فقط دنبال‌کنندگان پذیرفته‌شده</option></select></label><SpaceChooser spaces={spaces} value={spaceId} onChange={setSpaceId} mode="compose"/></div>
+      <div className="compose-settings"><label>نمایش<select value={visibility} onChange={event=>setVisibility(event.target.value as 'public'|'private')}><option value="public">عمومی</option><option value="private">فقط دنبال‌کنندگان پذیرفته‌شده</option></select></label><SpaceChooser spaces={spaces} value={spaceId} onChange={setSpaceId} mode="compose"/><label>دستهٔ پست · اختیاری<select value={categoryOverride===undefined?'auto':categoryOverride??'none'} onChange={event=>setCategoryOverride(event.target.value==='auto'?undefined:event.target.value==='none'?null:event.target.value as Category)}><option value="auto">خودکار · {categoryLabel(classifyPost(body))||'بدون دسته'}</option>{categories.map(item=><option value={item.id} key={item.id}>{item.label}</option>)}<option value="none">بدون دسته</option></select></label><small className="muted">اگر پیشنهاد خودکار درست نبود، همین‌جا عوضش کن.</small></div>
     </main>}
   </div>;
 }

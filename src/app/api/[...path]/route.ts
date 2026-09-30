@@ -6,12 +6,14 @@ import { event, getViewer, isAdmin, type Viewer } from '@/lib/auth';
 import { avatarSql, getPost, parseId, postSelect, readable, type Post } from '@/lib/posts';
 import { createSpace, listSpaces, spaceColumns, updateSpace } from '@/lib/spaces';
 import { sendCommentBotNotification } from '@/lib/bot-notifications';
+import { categories, classifyPost, type Category } from '@/lib/categories';
 
 export const runtime = 'nodejs';
 type Context = { params: Promise<{ path: string[] }> };
 const json = (data: unknown, status = 200) => NextResponse.json(data, { status });
 const body = async (request: NextRequest) => { try { return await request.json(); } catch { throw new Error('Invalid JSON'); } };
-const postInput = z.object({ body: z.string().trim().min(1).max(4000), visibility: z.enum(['public','private']), space_id: z.string().regex(/^[1-9]\d*$/).nullable().optional() });
+const categoryInput = z.enum(categories.map(item => item.id) as [Category, ...Category[]]);
+const postInput = z.object({ body: z.string().trim().min(1).max(4000), visibility: z.enum(['public','private']), space_id: z.string().regex(/^[1-9]\d*$/).nullable().optional(), category: categoryInput.nullable().optional() });
 const commentInput = z.object({ body: z.string().trim().min(1).max(2000) });
 const id = (path: string[], index: number) => parseId(path[index]);
 const adminOnly = (viewer: Viewer) => { if (!isAdmin(viewer)) throw new Error('Forbidden'); };
@@ -47,16 +49,19 @@ function cursor(url: URL) {
 }
 async function feed(request: NextRequest, viewer: Viewer, where: string, args: unknown[]) {
   const page = cursor(request.nextUrl);
+  const requestedCategory = request.nextUrl.searchParams.get('category');
+  const category = requestedCategory ? categoryInput.parse(requestedCategory) : null;
   const limit = 20;
   const values = [viewer.id, ...args];
   let sql = `${postSelect} WHERE p.deleted_at IS NULL AND u.disabled_at IS NULL AND ${readable} AND (${where})`;
+  if (category) { values.push(category); sql += ` AND p.category=$${values.length}`; }
   if (page) { values.push(page.date,page.key); sql += ` AND (p.created_at,p.id)<($${values.length-1}::timestamptz,$${values.length}::bigint)`; }
   values.push(limit + 1);
   sql += ` ORDER BY p.created_at DESC,p.id DESC LIMIT $${values.length}`;
   const found = await rows<Post>(db, sql, values);
   const items = found.slice(0,limit);
   const last = items.at(-1);
-  await event(db, viewer, 'feed_view', { scope: where === 'true' ? 'home' : 'filtered' });
+  await event(db, viewer, 'feed_view', { scope: where === 'true' ? 'home' : 'filtered', category });
   return json({ items, next_cursor: found.length > limit && last ? `${new Date(last.created_at).toISOString()}|${last.id}` : null });
 }
 async function handle(request: NextRequest, method: string, path: string[]) {
@@ -86,14 +91,18 @@ async function handle(request: NextRequest, method: string, path: string[]) {
     if (method === 'POST' && !key) {
       await rateLimit(viewer,'post_created',5,60);
       const input = postInput.parse(await body(request)); await existsSpace(input.space_id);
-      const [created] = await rows<{ id: string }>(db, 'INSERT INTO posts (author_id,body,visibility,space_id) VALUES ($1,$2,$3,$4) RETURNING id', [viewer.id,input.body,input.visibility,input.space_id || null]);
+      const category = input.category === undefined ? classifyPost(input.body) : input.category;
+      const source = input.category === undefined ? 'auto' : 'manual';
+      const [created] = await rows<{ id: string }>(db, 'INSERT INTO posts (author_id,body,visibility,space_id,category,category_source) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id', [viewer.id,input.body,input.visibility,input.space_id || null,category,source]);
       await event(db,viewer,'post_created',{ post_id:created.id }); return json({ id:created.id },201);
     }
     const postId = id(path,1);
     if (method === 'GET' && !sub) { const post = await getPost(postId,viewer); return post ? json({ post }) : json({ error:'Not found' },404); }
     if (method === 'PATCH' && !sub) {
       const input = postInput.partial().parse(await body(request)); await existsSpace(input.space_id);
-      const [updated] = await rows(db, `UPDATE posts SET body=COALESCE($3,body),visibility=COALESCE($4,visibility),space_id=CASE WHEN $5 THEN $6 ELSE space_id END,updated_at=now() WHERE id=$1 AND author_id=$2 AND deleted_at IS NULL RETURNING id`, [postId,viewer.id,input.body ?? null,input.visibility ?? null,Object.hasOwn(input,'space_id'),input.space_id ?? null]);
+      const manualCategory = Object.hasOwn(input,'category');
+      const nextCategory = manualCategory ? input.category : input.body === undefined ? null : classifyPost(input.body);
+      const [updated] = await rows(db, `UPDATE posts SET body=COALESCE($3,body),visibility=COALESCE($4,visibility),space_id=CASE WHEN $5 THEN $6 ELSE space_id END,category=CASE WHEN $7 OR ($3 IS NOT NULL AND category_source='auto') THEN $8 ELSE category END,category_source=CASE WHEN $7 THEN 'manual' ELSE category_source END,updated_at=now() WHERE id=$1 AND author_id=$2 AND deleted_at IS NULL RETURNING id`, [postId,viewer.id,input.body ?? null,input.visibility ?? null,Object.hasOwn(input,'space_id'),input.space_id ?? null,manualCategory,nextCategory]);
       return updated ? json({ ok:true }) : json({ error:'Not found' },404);
     }
     if (method === 'DELETE' && !sub) {

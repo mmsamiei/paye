@@ -1,5 +1,6 @@
 import { execFileSync, spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
+import { resolve4 } from 'node:dns/promises';
 import { readFileSync, writeFileSync } from 'node:fs';
 
 const docker = (...args) => execFileSync('docker', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
@@ -46,7 +47,18 @@ for (let attempt = 0; attempt < 60; attempt++) {
   try {
     const response = await fetch(appUrl, { signal: AbortSignal.timeout(5000) });
     if (response.ok) { reachable = true; break; }
-  } catch { /* DNS propagation can take a few seconds. */ }
+  } catch {
+    // macOS sometimes caches NXDOMAIN after the new tunnel is published.
+    // curl --resolve keeps TLS validation for the hostname while bypassing that cache.
+    try {
+      const hostname = new URL(appUrl).hostname;
+      const [address] = await resolve4(hostname);
+      const status = execFileSync('curl', ['--silent', '--show-error', '--output', '/dev/null',
+        '--write-out', '%{http_code}', '--max-time', '8', '--resolve', `${hostname}:443:${address}`, appUrl],
+      { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+      if (status === '200') { reachable = true; break; }
+    } catch { /* Keep waiting for the public route. */ }
+  }
   await new Promise(resolve => setTimeout(resolve, 1000));
 }
 if (!reachable) throw new Error(`The public app did not become reachable: ${appUrl}`);
